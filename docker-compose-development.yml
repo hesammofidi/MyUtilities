@@ -1,0 +1,20 @@
+name: benico_production
+services:
+  benico_services_production:
+    container_name: benico_services_production
+    image: benico_services:latest
+    environment:
+      - ASPNETCORE_ENVIRONMENT=production
+    ports: 
+      - "5012:8080"
+    # external volume for DataProtection
+    volumes:
+      - /home/benico/api/data_protection_keys:/root/.aspnet/DataProtection-Keys
+    networks:
+      - server_data_backbone
+
+networks:
+  benico_private:
+    name: benico_private
+    external: true
+    driver: bridge

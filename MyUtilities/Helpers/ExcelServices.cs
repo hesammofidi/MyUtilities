@@ -9,6 +9,146 @@ public static class ExcelServices
 {
     private static readonly PersianCalendar persianCalendar = new PersianCalendar();
 
+    public static WarehouseFileDto CreateSaleProductCountExcel(IFormFile siteExcel)
+    {
+        var productCounts = new Dictionary<string, int>();
+        using (var inputStream = siteExcel.OpenReadStream())
+        using (var sourceWorkbook = new XLWorkbook(inputStream))
+        {
+            var worksheet = sourceWorkbook.Worksheet(1);
+            foreach (var cell in worksheet.Column(2).CellsUsed(XLCellsUsedOptions.Contents))
+            {
+                if (cell.Address.RowNumber == 1)
+                    continue;
+
+                var productName = cell.GetString();
+                if (string.IsNullOrWhiteSpace(productName))
+                    continue;
+
+                productCounts.TryGetValue(productName, out var count);
+                productCounts[productName] = count + 1;
+            }
+        }
+
+        return CreateProductCountWorkbook(productCounts);
+    }
+
+    public static WarehouseFileDto CreateWarehouseSaleProductCountExcel(IFormFile warehouseExcel, DateOnly startDate)
+    {
+        string shamsiStartDate;
+        try
+        {
+            shamsiStartDate = startDate.ToDateTime(TimeOnly.MinValue).ToShamsi();
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new FormatException("تاریخ شروع خارج از محدوده تقویم شمسی است.");
+        }
+
+        if (!TryParseShamsiDate(shamsiStartDate, out var minimumDate))
+            throw new FormatException("تاریخ شروع قابل تبدیل به تاریخ شمسی نیست.");
+        var productCounts = new Dictionary<string, int>();
+        using (var inputStream = warehouseExcel.OpenReadStream())
+        using (var sourceWorkbook = new XLWorkbook(inputStream))
+        {
+            var worksheet = sourceWorkbook.Worksheet(1);
+            foreach (var cell in worksheet.Column(3).CellsUsed(XLCellsUsedOptions.Contents))
+            {
+                var row = cell.Address.RowNumber;
+                if (row == 1)
+                    continue;
+
+                var productName = cell.GetString();
+                if (string.IsNullOrWhiteSpace(productName))
+                    continue;
+
+                var dateCell = worksheet.Cell(row, 13);
+                DateTime orderDate;
+                if (dateCell.DataType == XLDataType.DateTime)
+                    orderDate = dateCell.GetDateTime().Date;
+                else if (!TryParseShamsiDate(dateCell.GetString(), out orderDate))
+                    continue;
+
+                if (orderDate < minimumDate)
+                    continue;
+
+                productCounts.TryGetValue(productName, out var count);
+                productCounts[productName] = count + 1;
+            }
+        }
+
+        return CreateProductCountWorkbook(productCounts);
+    }
+
+    private static bool TryParseShamsiDate(string value, out DateTime date)
+    {
+        date = default;
+        value = new string((value ?? string.Empty)
+            .Where(character => char.GetUnicodeCategory(character) != UnicodeCategory.Format)
+            .Select(character => character switch
+            {
+                >= '\u06F0' and <= '\u06F9' => (char)('0' + character - '\u06F0'),
+                >= '\u0660' and <= '\u0669' => (char)('0' + character - '\u0660'),
+                _ => character
+            }).ToArray()).Trim();
+
+        var parts = value.Split('/', StringSplitOptions.TrimEntries);
+        if (parts.Length != 3 || parts[0].Length < 1 || parts[0].Length > 4 ||
+            parts[1].Length < 1 || parts[1].Length > 2 || parts[2].Length < 1 || parts[2].Length > 2 ||
+            !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var year) ||
+            !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var month) ||
+            !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var day))
+            return false;
+
+        try
+        {
+            date = persianCalendar.ToDateTime(year, month, day, 0, 0, 0, 0);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+    }
+
+    private static WarehouseFileDto CreateProductCountWorkbook(Dictionary<string, int> productCounts)
+    {
+        using var workbook = new XLWorkbook();
+        var report = workbook.Worksheets.Add("تعداد فروش محصولات");
+        report.RightToLeft = true;
+        report.Cell(1, 1).Value = "نام محصول";
+        report.Cell(1, 2).Value = "تعداد فروش";
+
+        var row = 2;
+        foreach (var product in productCounts)
+        {
+            report.Cell(row, 1).Value = product.Key;
+            report.Cell(row, 2).Value = product.Value;
+            row++;
+        }
+
+        var usedRange = report.Range(1, 1, row - 1, 2);
+        usedRange.Style.Font.FontName = "Tahoma";
+        var header = report.Range(1, 1, 1, 2);
+        header.Style.Font.Bold = true;
+        header.Style.Fill.BackgroundColor = XLColor.LightBlue;
+        report.Column(1).Width = 60;
+        report.Column(1).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        usedRange.Style.Alignment.WrapText = true;
+        report.Column(2).Width = 18;
+        report.Column(2).Style.NumberFormat.Format = "#,##0";
+        report.SheetView.FreezeRows(1);
+
+        using var outputStream = new MemoryStream();
+        workbook.SaveAs(outputStream);
+        return new WarehouseFileDto
+        {
+            FileByte = outputStream.ToArray(),
+            FileName = "گزارش تعداد فروش محصولات.xlsx",
+            ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        };
+    }
+
     public static List<SiteExcelModel> ReadSiteExcel(IFormFile siteExcel)
     {
         try
