@@ -44,6 +44,29 @@ public class ExcelConvertController : ControllerBase
         }
     }
 
+    [HttpPost("warehouse-sale-product-count")]
+    [ProducesResponseType(typeof(List<SaleReportByProductDto>), StatusCodes.Status200OK)]
+    public IActionResult WarehouseSaleProductCount([FromForm] WarehouseSaleFileDto files)
+    {
+        if (!files.StartDate.HasValue)
+            return BadRequest(new { message = "تاریخ شروع را به میلادی با فرمت yyyy-MM-dd وارد کنید." });
+
+        try
+        {
+            var productCounts = ExcelServices.GetWarehouseSaleProductCounts(files.WarehouseExcel, files.StartDate.Value);
+            var report = productCounts.Select(product => new SaleReportByProductDto
+            {
+                Name = product.Key,
+                Count = product.Value
+            }).ToList();
+            return Ok(report);
+        }
+        catch (FormatException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("sale-product-count")]
     public async Task<IActionResult> SaleProductCount([FromForm] SaleFileDto files)
     {

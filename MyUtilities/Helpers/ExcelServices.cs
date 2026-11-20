@@ -35,6 +35,12 @@ public static class ExcelServices
 
     public static WarehouseFileDto CreateWarehouseSaleProductCountExcel(IFormFile warehouseExcel, DateOnly startDate)
     {
+        var productCounts = GetWarehouseSaleProductCounts(warehouseExcel, startDate);
+        return CreateProductCountWorkbook(productCounts);
+    }
+
+    public static Dictionary<string, int> GetWarehouseSaleProductCounts(IFormFile warehouseExcel, DateOnly startDate)
+    {
         string shamsiStartDate;
         try
         {
@@ -77,7 +83,7 @@ public static class ExcelServices
             }
         }
 
-        return CreateProductCountWorkbook(productCounts);
+        return productCounts;
     }
 
     private static bool TryParseShamsiDate(string value, out DateTime date)
